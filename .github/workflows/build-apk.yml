@@ -54,11 +54,12 @@ jobs:
         working-directory: ${{ steps.src.outputs.dir }}
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Tải APK lên
+      - name: Tải APK lên (file .apk trực tiếp, không nén zip)
         uses: actions/upload-artifact@v7
         with:
-          name: ScoutWriter-debug-apk
-          path: ${{ steps.src.outputs.dir }}/app/build/outputs/apk/debug/*.apk
+          # archive: false chỉ nhận đúng 1 file; tên artifact sẽ là tên file (app-debug.apk), input `name` bị bỏ qua.
+          path: ${{ steps.src.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
+          archive: false
           if-no-files-found: error
           retention-days: 30
 
