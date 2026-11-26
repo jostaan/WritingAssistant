@@ -1,0 +1,74 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Tuỳ chọn: đặt 4 secrets này để mọi bản build dùng cùng một khoá ký (cập nhật đè được lên bản đã cài).
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Giải nén data.zip
+        id: src
+        run: |
+          set -euo pipefail
+          test -f data.zip || { echo "::error::Không thấy data.zip ở thư mục gốc repo"; exit 1; }
+          rm -rf src && mkdir src
+          unzip -q data.zip -d src
+          SETTINGS=$(find src -maxdepth 3 -name 'settings.gradle*' | awk '{print length, $0}' | sort -n | head -n 1 | cut -d' ' -f2-)
+          test -n "$SETTINGS" || { echo "::error::data.zip không chứa settings.gradle.kts"; exit 1; }
+          DIR=$(dirname "$SETTINGS")
+          test -f "$DIR/gradlew" || { echo "::error::data.zip không chứa gradlew"; exit 1; }
+          chmod +x "$DIR/gradlew"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Giải mã keystore (chỉ khi đã đặt secrets)
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/ci.keystore"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/ci.keystore" >> "$GITHUB_ENV"
+
+      - name: Chấp nhận license Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Build debug APK
+        working-directory: ${{ steps.src.outputs.dir }}
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Tải APK lên
+        uses: actions/upload-artifact@v7
+        with:
+          name: ScoutWriter-debug-apk
+          path: ${{ steps.src.outputs.dir }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Tải báo cáo lỗi (khi build hỏng)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-reports
+          path: |
+            ${{ steps.src.outputs.dir }}/app/build/reports
+            ${{ steps.src.outputs.dir }}/app/build/outputs/logs
+          if-no-files-found: ignore
+          retention-days: 7
